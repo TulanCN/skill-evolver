@@ -1,0 +1,11 @@
+{
+  "name": "skill-evolver",
+  "version": "0.1.0",
+  "description": "Autonomous skill evolution engine for Claude Code. Outer-loop optimization with mechanical grading, A/B comparison, and automatic rollback.",
+  "author": {
+    "name": "Tulan Dai"
+  },
+  "license": "MIT",
+  "keywords": ["evolution", "optimization", "grading", "A/B testing", "skill-improvement"],
+  "repository": "https://github.com/TulanCN/skill-evolver"
+}

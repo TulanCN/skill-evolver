@@ -1,0 +1,16 @@
+# Skill Evolver — Self-Evolution Target
+
+# The evolver evolving itself. Meta.
+project_root: /Users/daizheli/workspace/skill-evolver
+
+skills:
+  - name: skill-evolver
+    path: skills/skill-evolver
+    evals_dir: evals/skill-evolver
+
+settings:
+  max_iterations: 10
+  min_delta: 0.01
+  atomic_changes: true
+  auto_revert: true
+  guard: "python3 tests/fixtures/dummy/evals/grade.py"

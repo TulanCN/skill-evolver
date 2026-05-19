@@ -1,0 +1,19 @@
+{
+  "skills": {
+    "dummy-writer": {
+      "skill_path": "tests/fixtures/dummy/skill",
+      "evals": [
+        {
+          "id": "write-report",
+          "name": "生成测试报告",
+          "iteration": 1,
+          "prompt": "请生成一份关于\"Python 代码审查自动化\"的报告。将报告写入 report.md。",
+          "project_dirs": {
+            "with_skill": "/tmp/dummy-test-with-skill",
+            "without_skill": "/tmp/dummy-test-without-skill"
+          }
+        }
+      ]
+    }
+  }
+}

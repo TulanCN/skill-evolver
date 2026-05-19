@@ -1,0 +1,13 @@
+# Dependencies (none — pure Python stdlib)
+__pycache__/
+*.pyc
+
+# Experiment data (large, not for version control)
+experiments/*/
+!experiments/.gitkeep
+
+# OS
+.DS_Store
+Thumbs.db
+.envrc
+.venv/

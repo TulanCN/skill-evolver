@@ -1,0 +1,29 @@
+{
+  "skills": {
+    "skill-evolver": {
+      "skill_path": "evolver",
+      "evals": [
+        {
+          "id": "framework-correctness",
+          "name": "框架代码正确性",
+          "iteration": 1,
+          "prompt": "验证 skill-evolver 框架代码：\n1. 运行 python3 evolver/framework/runner.py score 命令确保计算正确\n2. 运行 python3 evolver/scripts/aggregate.py 命令确保 TSV 操作正确\n3. 验证 base_grade.py 的 Assertion/GradingResult/BaseGrader 类工作正常",
+          "project_dirs": {
+            "with_skill": "/tmp/evolver-self-test",
+            "without_skill": "/tmp/evolver-self-test-baseline"
+          }
+        },
+        {
+          "id": "skill-prompt-quality",
+          "name": "SKILL.md 质量检查",
+          "iteration": 1,
+          "prompt": "审查 skills/skill-evolver/SKILL.md:\n1. 检查 YAML frontmatter 有效性\n2. 验证所有必需章节存在（Step 0-3, Guard, Crash Recovery, Subagent Protocol, Important Constraints）\n3. 检查引用的工具和文件路径是否一致\n4. 验证评分公式和聚合逻辑是否正确描述",
+          "project_dirs": {
+            "with_skill": "/tmp/evolver-skill-test",
+            "without_skill": "/tmp/evolver-skill-test-baseline"
+          }
+        }
+      ]
+    }
+  }
+}

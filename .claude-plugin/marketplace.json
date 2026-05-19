@@ -1,0 +1,26 @@
+{
+  "name": "skill-evolver",
+  "owner": {
+    "name": "Tulan Dai"
+  },
+  "metadata": {
+    "description": "Claude Code skill evolution engine - autonomous outer-loop optimization with mechanical grading"
+  },
+  "plugins": [
+    {
+      "name": "skill-evolver",
+      "source": {
+    "source": "github",
+    "repo": "TulanCN/skill-evolver"
+  },
+      "description": "Autonomous skill evolution engine. Iteratively improves Claude Code skills through A/B testing, mechanical grading, and atomic changes.",
+      "version": "0.1.0",
+      "author": {
+        "name": "Tulan Dai"
+      },
+      "license": "MIT",
+      "keywords": ["evolution", "optimization", "grading", "skill"],
+      "category": "development"
+    }
+  ]
+}

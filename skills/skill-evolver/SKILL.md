@@ -61,6 +61,10 @@ The evals directory must contain:
 - `evals.json` — eval definitions (see schema below)
 - `iteration-N/` — optional fixture directories
 
+For L3 assertion design guidance, see `references/l3-assertion-patterns.md` in this skill.
+Good L3 assertions discriminate — with-skill passes, without-skill fails. If both pass at 100%,
+the assertion is dead weight.
+
 ### evals.json Schema
 
 ```json
@@ -131,6 +135,39 @@ delta = overall_with_score - overall_without_score
 If `delta < 0.05`, the eval assertions lack discriminative power — bare Claude can almost match the skill. Consider adding more L3 assertions before evolving.
 
 L3 (content quality) gets higher weight to combat Goodhart — we don't want the optimizer to sacrifice quality for structural compliance.
+
+### 1.5 Audit Assertion Discrimination
+
+Before entering the evolution loop, audit every assertion for discriminatory power.
+An assertion that passes 100% in BOTH tracks (with AND without skill) is dead weight — it costs grading time but provides zero signal.
+
+**Audit procedure**:
+
+For each assertion in the baseline grading results:
+1. Compare pass rate in with_skill vs without_skill
+2. Classify:
+   - **Strong discriminator**: passes with-skill, fails without-skill → keep, valuable
+   - **Weak discriminator**: passes both, but with-skill passes more consistently (>20% gap) → keep but monitor
+   - **Non-discriminator**: passes 100% in BOTH tracks → flag for replacement
+   - **Anti-discriminator**: fails with-skill, passes without-skill → the skill may be hurting
+
+**Output an audit summary**:
+
+```
+Assertion Audit (<N> total):
+  Strong:   <K> — clearly differentiate skill value
+  Weak:     <W> — marginal, monitor
+  Dead:     <D> — pass 100% both tracks, need replacement
+  Reversed: <R> — skill makes it worse (investigate)
+```
+
+**Action on dead assertions**:
+- If dead assertions are L1 or L2: the skill's structural output is solid. Accept and move on.
+- If dead assertions are L3: red flag. The L3 assertions aren't measuring content quality. Read `references/l3-assertion-patterns.md` for better design patterns, then propose replacement assertions BEFORE starting evolution.
+- If >30% of all assertions are dead: the eval suite lacks teeth. Pause evolution and fix the evals first.
+- If delta (with - without) < 0.05 AND >30% assertions are dead: the evals cannot meaningfully guide improvement. Fix evals before proceeding.
+
+**Dead L3 example**: "摘要 >3 句" — both with and without pass 100%. Replace with: "摘要提到至少一个具体的人名、数字或日期" — bare Claude often writes vague summaries without concrete anchoring.
 
 ### Confirm and Go
 
@@ -204,11 +241,9 @@ Compare new aggregate score to previous best:
 - `new_score <= prev_best + min_delta` → REVERT (`git checkout -- <skill-path>`)
 - If reverted: log the failed hypothesis, optionally run post-hoc analysis (see Blind Quality Check)
 
-**Blind quality gate**: mechanical scores can be gamed. Before finalizing a keep decision, run a blind comparison if any of these triggers fire:
-- Every 5th iteration (periodic sanity check)
-- L3 score improved >0.15 in a single iteration (suspiciously fast)
-- This iteration's hypothesis was purely structural (e.g., adding keywords, reordering sections)
-If the blind comparison disagrees with the mechanical score, revert even if mechanical metrics improved.
+**Blind quality gate**: see "## Blind Quality Check" for full protocol. Key rule:
+- **Primary Gate mode** (assertions weak): blind comparison runs every iteration, its winner determines keep/revert
+- **Periodic mode** (assertions healthy): blind comparison runs on triggers (every 5th iteration, L3 jump >0.15, structural hypothesis). If winner disagrees with mechanical score, revert even if metrics improved.
 
 ### 2.6 Log
 
@@ -303,7 +338,20 @@ Example: when evolving skill A, guard with skill B's evals to ensure changes to 
 
 Mechanical assertions (L1/L2/L3) can be gamed — the optimizer learns to pass assertions without actually improving output quality. Blind comparison is an independent quality signal: a fresh agent compares with-skill and without-skill outputs without knowing which is which.
 
-### When to Trigger
+### Operating Mode
+
+Blind check runs in one of two modes, determined by the baseline assertion audit (Step 1.5):
+
+| Mode | Condition | Behavior |
+|------|-----------|----------|
+| **Periodic** (default) | Assertions have healthy discrimination (delta > 0.05, <30% dead) | Blind check every 5 iterations as sanity check |
+| **Primary Gate** | Assertions lack discrimination (delta < 0.05, or >30% dead L3 assertions) | Blind check runs on EVERY iteration as the main keep/revert gate |
+
+In Primary Gate mode, the mechanical score still runs, but the blind comparison's winner determines keep/revert. The mechanical score is recorded for tracking but doesn't decide. This prevents the optimizer from gaming weak assertions — even if it learns to pass every dead L3 check, the blind judge catches quality regressions.
+
+**Mode transition**: Start in Periodic. If the baseline audit triggers Primary Gate, stay in it until assertions are improved (dead L3% < 30% AND delta > 0.05 after re-running baseline with new assertions). The evolver should proactively suggest assertion improvements when stuck in Primary Gate mode.
+
+### When to Trigger (Periodic Mode)
 
 | Trigger | Rationale |
 |---------|-----------|
@@ -312,7 +360,7 @@ Mechanical assertions (L1/L2/L3) can be gamed — the optimizer learns to pass a
 | Hypothesis is purely structural | Adding keywords, reordering sections — easy to game |
 | Manual request | Proposer wants a second opinion |
 
-Skip blind check if all L3 assertions already pass at 100% and scores are stable (the skill is converged).
+Skip blind check in Periodic mode if all L3 assertions pass at 100% AND delta > 0.05 (skill is genuinely converged). Never skip in Primary Gate mode — the high dead-assertion rate means L3 passing doesn't guarantee quality.
 
 ### Blind Comparator Agent
 

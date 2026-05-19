@@ -29,6 +29,7 @@ REQUIRED_SECTIONS = [
 ]
 
 REQUIRED_SUBSECTIONS = [
+    "1.5 Audit Assertion Discrimination",
     "2.1 Analyze",
     "2.2 Propose",
     "2.3 Apply",
@@ -51,6 +52,7 @@ class SkillEvolverGrader(BaseGrader):
     def check_all(self, r: GradingResult) -> None:
         self._check_framework_code(r)
         self._check_skill_prompt(r)
+        self._check_blind_quality_features(r)
         self._check_tool_consistency(r)
 
     # ---- Framework code checks ----
@@ -250,6 +252,29 @@ class SkillEvolverGrader(BaseGrader):
         has_atomic = "ONE change" in content or "one change" in content.lower() or "atomic" in content.lower()
         r.add(Assertion("包含原子变更规则", level=3).check(
             has_atomic, "有" if has_atomic else "缺失"))
+
+    def _check_blind_quality_features(self, r: GradingResult):
+        skill_md = PROJECT_ROOT / "skills" / "skill-evolver" / "SKILL.md"
+        if not skill_md.is_file():
+            return
+        content = skill_md.read_text()
+
+        has_primary_gate = "Primary Gate" in content
+        r.add(Assertion("盲检包含 Primary Gate 模式", level=3).check(
+            has_primary_gate, "有" if has_primary_gate else "缺失"))
+
+        has_audit = "non-discriminator" in content.lower() or "dead assertion" in content.lower() or "dead weight" in content.lower()
+        r.add(Assertion("包含断言区分力审计逻辑", level=3).check(
+            has_audit, "有" if has_audit else "缺失"))
+
+        has_l3_ref = "l3-assertion-patterns.md" in content
+        r.add(Assertion("引用了 L3 断言设计模式参考文件", level=3).check(
+            has_l3_ref, "引用" if has_l3_ref else "未引用"))
+
+        # Verify the reference file exists
+        l3_patterns = PROJECT_ROOT / "skills" / "skill-evolver" / "references" / "l3-assertion-patterns.md"
+        r.add(Assertion("l3-assertion-patterns.md 文件存在", level=1).check(
+            l3_patterns.is_file(), str(l3_patterns) if l3_patterns.is_file() else "不存在"))
 
     # ---- Tool consistency checks ----
 

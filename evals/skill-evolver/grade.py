@@ -22,6 +22,7 @@ REQUIRED_SECTIONS = [
     "Step 2: Evolution Loop",
     "Step 3: Termination",
     "Guard",
+    "Blind Quality Check",
     "Crash Recovery",
     "Subagent Protocol",
     "Important Constraints",

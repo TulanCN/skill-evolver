@@ -200,9 +200,15 @@ python3 ${CLAUDE_PLUGIN_ROOT}/evolver/framework/runner.py score experiments/{ski
 ```
 
 Compare new aggregate score to previous best:
-- `new_score > prev_best + min_delta` → KEEP, log result
+- `new_score > prev_best + min_delta` → tentative KEEP, proceed to blind quality check
 - `new_score <= prev_best + min_delta` → REVERT (`git checkout -- <skill-path>`)
-- If reverted: log the failed hypothesis for future reference
+- If reverted: log the failed hypothesis, optionally run post-hoc analysis (see Blind Quality Check)
+
+**Blind quality gate**: mechanical scores can be gamed. Before finalizing a keep decision, run a blind comparison if any of these triggers fire:
+- Every 5th iteration (periodic sanity check)
+- L3 score improved >0.15 in a single iteration (suspiciously fast)
+- This iteration's hypothesis was purely structural (e.g., adding keywords, reordering sections)
+If the blind comparison disagrees with the mechanical score, revert even if mechanical metrics improved.
 
 ### 2.6 Log
 
@@ -292,6 +298,91 @@ Guard rules:
 - This ensures optimizing one skill doesn't silently break another
 
 Example: when evolving skill A, guard with skill B's evals to ensure changes to A don't break B's output format expectations.
+
+## Blind Quality Check
+
+Mechanical assertions (L1/L2/L3) can be gamed — the optimizer learns to pass assertions without actually improving output quality. Blind comparison is an independent quality signal: a fresh agent compares with-skill and without-skill outputs without knowing which is which.
+
+### When to Trigger
+
+| Trigger | Rationale |
+|---------|-----------|
+| Every 5 iterations | Periodic sanity check |
+| L3 score jumps >0.15 in one iteration | Suspiciously fast improvement |
+| Hypothesis is purely structural | Adding keywords, reordering sections — easy to game |
+| Manual request | Proposer wants a second opinion |
+
+Skip blind check if all L3 assertions already pass at 100% and scores are stable (the skill is converged).
+
+### Blind Comparator Agent
+
+Spawn a subagent with this prompt template:
+
+```
+You are a blind quality judge. You will see two outputs labeled A and B.
+You do NOT know which skill or configuration produced them.
+Judge purely on output quality and task completion.
+
+Output A: {path to with-skill or without-skill output, randomly assigned}
+Output B: {path to the other output}
+Task: {eval.prompt}
+
+Step 1: Read both outputs carefully.
+Step 2: Understand what the task requires.
+Step 3: Score each output on two dimensions (1-5 each):
+  - Content: correctness, completeness, accuracy
+  - Structure: organization, formatting, usability
+Step 4: Determine the winner (A, B, or TIE).
+
+Save your judgment to {output_path}/comparison.json:
+{
+  "winner": "A"|"B"|"TIE",
+  "reasoning": "specific explanation",
+  "rubric": {
+    "A": {"content": {"correctness": 4, "completeness": 5, "accuracy": 4}, "content_score": 4.3, "structure": {...}, "structure_score": 4.0, "overall_score": 8.3},
+    "B": {...}
+  }
+}
+
+CRITICAL: Do NOT try to infer which output came from the skill. Judge outputs as-is.
+```
+
+**Randomization**: Randomly assign which output is A and which is B. Record the mapping so you can unblind after.
+
+### Interpreting Results
+
+After the comparator finishes, read `comparison.json`:
+
+- **Winner = with-skill output AND mechanical delta > 0**: Strong confirmation. Keep.
+- **Winner = with-skill output BUT mechanical delta ≤ 0**: Mechanical assertions are too strict or miss what matters. Consider revising assertions.
+- **Winner = without-skill output (mechanical score said keep)**: The mechanical improvement was spurious. REVERT.
+- **Winner = without-skill output (mechanical score said revert)**: Confirmed regression. Keep the revert.
+- **TIE**: Mechanical score decides (fall back to normal keep/revert logic).
+
+### Post-hoc Analysis (on revert)
+
+When a change is reverted, optionally spawn an analyzer agent to understand WHY:
+
+```
+Read the blind comparison result at {comparison.json}.
+The winning skill is at {winner_skill_path}, the losing skill at {loser_skill_path}.
+
+Analyze:
+1. What specific difference in the skill instructions caused the outcome?
+2. Quote from both skills where they diverge.
+3. What concrete change would likely flip the result?
+
+Save to {output_path}/analysis.json:
+{
+  "winner_strengths": ["specific strength 1", ...],
+  "loser_weaknesses": ["specific weakness 1", ...],
+  "improvement_suggestions": [
+    {"priority": "high"|"medium"|"low", "category": "instructions"|"tools"|"examples"|"error_handling", "suggestion": "...", "expected_impact": "..."}
+  ]
+}
+```
+
+The analysis feeds into the next iteration's Propose step — the proposer reads `analysis.json` alongside grading failures to form a better hypothesis.
 
 ## Crash Recovery
 

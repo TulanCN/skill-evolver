@@ -198,6 +198,7 @@ Rules for proposals:
 - Prefer explanation over MUSTs — explain the reasoning, don't just add constraints
 - If experiments.tsv shows similar changes already failed, try a different approach
 - Look for what worked in past iterations and build on it
+- **Explicitly declare** that your proposal follows the atomic change principle («仅一处修改»), and explain why single-variable changes enable causal attribution
 
 **Common proposal mistakes to avoid:**
 

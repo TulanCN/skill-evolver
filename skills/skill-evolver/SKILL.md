@@ -22,38 +22,26 @@ Three principles:
 ## Workflow
 
 ```
-LOAD target config → READ skill + evals → ESTABLISH baseline →
-LOOP:
-  1. ANALYZE grading results — which assertions fail? what's the weakest dimension?
-  2. READ current SKILL.md + references (full source)
-  3. READ experiments.tsv — what's been tried? what worked? what failed?
-  4. PROPOSE one focused hypothesis ("changing X will improve Y because Z")
-  5. APPLY the change (edit one section of SKILL.md or a reference)
-  6. RUN all evals (spawn with-skill and without-skill agents in parallel)
-  7. WAIT for all agents to complete
-  8. GRADE results → compute new aggregate score
-  9. IF score improved → KEEP, log to experiments.tsv
-  10. IF score didn't improve → REVERT (git checkout), log failure
-  11. IF score decreased significantly → ANALYZE why, log learning
-  12. PRINT progress summary every iteration
+BASELINE → LOOP { ANALYZE → PROPOSE → APPLY → VERIFY → KEEP/REVERT → LOG }
 ```
+Core cycle: read evidence, propose one atomic change, verify mechanically, keep or revert. Full details in Step 2 below.
+Steps: ANALYZE → READ → PROPOSE → APPLY → RUN all evals → GRADE → KEEP or REVERT → LOG
 
 ## Step 0: Load Target Config
 
-Read `targets/<target>.yaml`. Target YAML schema:
+Read `targets/<target>.yaml`:
 
 ```yaml
-project_root: /absolute/path/to/project   # project containing skills
+project_root: /path/to/project
 skills:
-  - name: skill-name                       # skill identifier
-    path: plugins/.../skills/skill-name    # relative to project_root
-    evals_dir: evals/skill-name            # relative to project_root, contains grade.py
+  - name: <id>           # skill identifier
+    path: skills/<id>    # relative to project_root
+    evals_dir: evals/<id>  # must contain grade.py + evals.json
 settings:
-  max_iterations: 20     # stop after N iterations (omit for unbounded)
-  min_delta: 0.01        # minimum aggregate improvement to keep change
-  atomic_changes: true   # always true — one change per iteration
-  auto_revert: true      # revert if score doesn't improve
-  guard: null            # optional: evals_dir of another skill to protect
+  max_iterations: 20     # omit for unbounded
+  min_delta: 0.01        # minimum score delta to keep
+  auto_revert: true      # revert on no improvement
+  guard: null            # optional regression test command
 ```
 
 The evals directory must contain:
@@ -70,29 +58,23 @@ the assertion is dead weight.
 ```json
 {
   "skills": {
-    "skill-name": {
-      "skill_path": "plugins/.../skills/skill-name",
-      "evals": [
-        {
-          "id": "unique-eval-id",
-          "name": "人类可读名称",
-          "iteration": 1,
-          "prompt": "给 agent 的执行指令...",
-          "project_dirs": {
-            "with_skill": "/tmp/skill-test-with-skill",
-            "without_skill": "/tmp/skill-test-without-skill"
-          }
+    "<id>": {
+      "skill_path": "skills/<id>",
+      "evals": [{
+        "id": "eval-id", "name": "描述", "iteration": 1,
+        "prompt": "给 agent 的执行指令...",
+        "project_dirs": {
+          "with_skill": "/tmp/test-with",
+          "without_skill": "/tmp/test-without"
         }
-      ]
+      }]
     }
   }
 }
 ```
-
-Key fields:
-- `prompt`: the exact text given to the eval agent (injected into the subagent prompt template)
-- `project_dirs.with_skill` / `project_dirs.without_skill`: isolated working directories for each track
-- `iteration`: fixture version — increment when eval prompts or grading rules change
+- `prompt`: injected into subagent prompt template
+- `project_dirs.*`: isolated working directories for each track
+- `iteration`: fixture version, increment when prompts/grading change
 
 ## Step 1: Establish Baseline
 
@@ -217,6 +199,12 @@ Rules for proposals:
 - If experiments.tsv shows similar changes already failed, try a different approach
 - Look for what worked in past iterations and build on it
 
+**Common proposal mistakes to avoid:**
+
+- **Bad** — 笼统假设: 「完善错误处理」→ 无法验证是否真的改善。**Good**: 「Crash Recovery 中 timeout 类型的动作从 'log warning' 改为 'kill subagents + revert'」
+- **Bad** — 重试已失败方案: experiments.tsv 显示类似改动被丢弃，仍然尝试同样的方向。必须先分析上一次失败的原因再尝试不同方案。
+- **Bad** — 一次改多个概念: 同时修改 scoring formula + subagent protocol + crash recovery。违反原子变更规则，分数变化无法归因到具体改动。
+
 ### 2.3 Apply
 
 Edit the skill file. ONE section, ONE concept. Commit with message:
@@ -230,11 +218,11 @@ Re-run all evals using the same process as Step 1 (prepare dirs → spawn agents
 
 ### 2.5 Keep or Revert
 
-Compute scores from grading.json:
+Compute scores from grading.json (same `runner.py score` as Step 1.4):
 ```
-python3 ${CLAUDE_PLUGIN_ROOT}/evolver/framework/runner.py score experiments/{skill}/iter-{N}/modified/with_skill/grading.json
-python3 ${CLAUDE_PLUGIN_ROOT}/evolver/framework/runner.py score experiments/{skill}/iter-{N}/modified/without_skill/grading.json
+python3 ${CLAUDE_PLUGIN_ROOT}/evolver/framework/runner.py score experiments/{skill}/iter-{N}/modified/{track}/grading.json
 ```
+(where `{track}` is `with_skill` and `without_skill` respectively)
 
 Compare new aggregate score to previous best:
 - `new_score > prev_best + min_delta` → tentative KEEP, proceed to blind quality check
@@ -364,35 +352,22 @@ Skip blind check in Periodic mode if all L3 assertions pass at 100% AND delta > 
 
 ### Blind Comparator Agent
 
-Spawn a subagent with this prompt template:
+Spawn a subagent with this prompt:
 
 ```
-You are a blind quality judge. You will see two outputs labeled A and B.
-You do NOT know which skill or configuration produced them.
-Judge purely on output quality and task completion.
-
-Output A: {path to with-skill or without-skill output, randomly assigned}
-Output B: {path to the other output}
+You are a blind quality judge. Output A and B come from unknown sources.
 Task: {eval.prompt}
 
-Step 1: Read both outputs carefully.
-Step 2: Understand what the task requires.
-Step 3: Score each output on two dimensions (1-5 each):
-  - Content: correctness, completeness, accuracy
-  - Structure: organization, formatting, usability
-Step 4: Determine the winner (A, B, or TIE).
+Output A: {path_a}
+Output B: {path_b}
 
-Save your judgment to {output_path}/comparison.json:
-{
-  "winner": "A"|"B"|"TIE",
-  "reasoning": "specific explanation",
-  "rubric": {
-    "A": {"content": {"correctness": 4, "completeness": 5, "accuracy": 4}, "content_score": 4.3, "structure": {...}, "structure_score": 4.0, "overall_score": 8.3},
-    "B": {...}
-  }
-}
+1. Read both outputs.
+2. Score each on Content (correctness/completeness/accuracy, 1-5) and Structure (organization/formatting/usability, 1-5).
+3. Pick winner: A, B, or TIE.
 
-CRITICAL: Do NOT try to infer which output came from the skill. Judge outputs as-is.
+Save to {output_path}/comparison.json:
+{"winner": "A"|"B"|"TIE", "reasoning": "...", "rubric": {"A": {...}, "B": {...}}}
+CRITICAL: Do NOT try to infer which output came from the skill.
 ```
 
 **Randomization**: Randomly assign which output is A and which is B. Record the mapping so you can unblind after.
@@ -401,36 +376,28 @@ CRITICAL: Do NOT try to infer which output came from the skill. Judge outputs as
 
 After the comparator finishes, read `comparison.json`:
 
-- **Winner = with-skill output AND mechanical delta > 0**: Strong confirmation. Keep.
-- **Winner = with-skill output BUT mechanical delta ≤ 0**: Mechanical assertions are too strict or miss what matters. Consider revising assertions.
-- **Winner = without-skill output (mechanical score said keep)**: The mechanical improvement was spurious. REVERT.
-- **Winner = without-skill output (mechanical score said revert)**: Confirmed regression. Keep the revert.
-- **TIE**: Mechanical score decides (fall back to normal keep/revert logic).
+| Blind Winner | Mechanical Delta | Verdict | Action |
+|-------------|-----------------|---------|--------|
+| with-skill | delta > 0 | Strong confirmation | KEEP |
+| with-skill | delta ≤ 0 | Assertions too strict or miss what matters | Consider revising assertions; tentative KEEP |
+| without-skill | delta > 0 | Mechanical improvement was spurious | REVERT |
+| without-skill | delta ≤ 0 | Confirmed regression | Keep the revert |
+| TIE | any | Mechanical score decides | Fall back to normal keep/revert |
 
 ### Post-hoc Analysis (on revert)
 
-When a change is reverted, optionally spawn an analyzer agent to understand WHY:
+Spawn an analyzer to understand WHY a change was reverted:
 
 ```
-Read the blind comparison result at {comparison.json}.
-The winning skill is at {winner_skill_path}, the losing skill at {loser_skill_path}.
-
-Analyze:
-1. What specific difference in the skill instructions caused the outcome?
-2. Quote from both skills where they diverge.
-3. What concrete change would likely flip the result?
+Read {comparison.json}. Winner: {winner_path}, Loser: {loser_path}.
+1. What specific instruction difference caused the outcome? Quote both.
+2. What concrete change would flip the result?
 
 Save to {output_path}/analysis.json:
-{
-  "winner_strengths": ["specific strength 1", ...],
-  "loser_weaknesses": ["specific weakness 1", ...],
-  "improvement_suggestions": [
-    {"priority": "high"|"medium"|"low", "category": "instructions"|"tools"|"examples"|"error_handling", "suggestion": "...", "expected_impact": "..."}
-  ]
-}
+{"winner_strengths": [...], "loser_weaknesses": [...], "improvement_suggestions": [{"priority": "high"|"medium"|"low", "suggestion": "..."}]}
 ```
 
-The analysis feeds into the next iteration's Propose step — the proposer reads `analysis.json` alongside grading failures to form a better hypothesis.
+The analysis feeds into the next Propose step — proposer reads `analysis.json` alongside grading failures.
 
 ## Crash Recovery
 
@@ -453,73 +420,38 @@ timestamp           iteration  type        detail              action
 
 ## Subagent Protocol
 
-Each eval runs two agents in parallel. Use the `Agent` tool with `run_in_background: true`.
+Each eval spawns two agents in parallel (`Agent` tool, `run_in_background: true`).
 
 ### Agent Prompt Template
 
-For each eval definition (from `evals.json`), construct the agent prompt as follows.
-Use `{skill_path}` = the absolute path from target config (`project_root + path`).
+For each eval definition from `evals.json`. `{skill_path}` = `project_root + path`.
 
 **with-skill agent:**
 ```
-Your task is to execute the following request using the {skill_name} skill.
+Execute this task using the {skill_name} skill.
+First, read {skill_path}/SKILL.md and {skill_path}/references/. Follow the skill's instructions exactly.
+Then: {eval.prompt}
 
-First, read the skill file at {skill_path}/SKILL.md and any referenced files
-in {skill_path}/references/. Follow the skill's instructions exactly.
-
-Then, execute this task:
-{eval.prompt}
-
-IMPORTANT: You must work in the directory: {eval.project_dirs.with_skill}
-Create all output files under that directory. When done, save a brief summary
-of what you did to {eval.project_dirs.with_skill}/outputs/summary.md
+Work in the directory: {eval.project_dirs.with_skill}. Save summary to {eval.project_dirs.with_skill}/outputs/summary.md
 ```
 
-Note: The agent reads the skill file directly rather than using the `Skill` tool,
-because test/development skills are not registered in Claude Code's skill registry.
-The `Skill` tool only works for installed skills. Reading the file directly is
-always reliable.
+Note: Read the skill file directly — the `Skill` tool only works for installed skills, not development skills.
 
 **without-skill agent:**
 ```
-Your task is to execute the following request WITHOUT using any skill.
-Do NOT read any SKILL.md file. Do NOT load any skill. Work from your own knowledge.
+Execute this task WITHOUT any skill. Do NOT read any SKILL.md. Work from your own knowledge.
+Task: {eval.prompt}
 
-Execute this task:
-{eval.prompt}
-
-IMPORTANT: You must work in the directory: {eval.project_dirs.without_skill}
-Create all output files under that directory. When done, save a brief summary
-of what you did to {eval.project_dirs.without_skill}/outputs/summary.md
+Work in {eval.project_dirs.without_skill}. Save summary to {eval.project_dirs.without_skill}/outputs/summary.md
 ```
 
-### Before Spawning
+### Lifecycle
 
-1. Read the eval definition from the target's `evals.json`
-2. Ensure the project directories exist: `mkdir -p {project_dir}/outputs`
-3. If the eval has fixture files (in `iteration-N/`), copy them to the project dir first
-4. Spawn both agents simultaneously with `run_in_background: true`
-5. Wait for both to complete before proceeding to grading
+1. **Before**: `mkdir -p {project_dir}/outputs`, copy fixtures if present
+2. **Execute**: spawn both agents simultaneously, wait for completion
+3. **After**: `python3 ${CLAUDE_PLUGIN_ROOT}/evolver/framework/runner.py grade {evals_dir} {project_dir} {label}`; save results to `experiments/{skill}/iter-{N}/{config}/{track}/`
 
-### After Agents Complete
-
-Run grading for each track:
-```
-python3 ${CLAUDE_PLUGIN_ROOT}/evolver/framework/runner.py grade {evals_dir} {project_dir} {label}
-```
-
-Save results:
-```
-mkdir -p experiments/{skill}/iter-{N}/{config}/{track}/
-cp {project_dir}/grading.json experiments/{skill}/iter-{N}/{config}/{track}/
-```
-
-### Parallelism
-
-- All evals for a skill run in parallel (each spawns its own with/without pair)
-- Within each eval, the with-skill and without-skill agents run in parallel
-- Total concurrent agents = N_evals × 2
-- If token/resource limits are a concern, batch evals in groups of 2-3
+Parallelism: all evals run in parallel, N_evals × 2 concurrent agents. Batch in groups of 2-3 if resource-constrained.
 
 ## Important Constraints
 

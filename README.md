@@ -19,7 +19,7 @@
 /skill-evolver 进化 <skill-name>
 ```
 
-### 方式二：克隆 + 本地安装
+### 方式二：自我迭代
 
 ```bash
 git clone https://github.com/TulanCN/skill-evolver.git
@@ -35,6 +35,10 @@ claude
 ```
 
 然后：
+
+```
+/skill-evolver 进化skill-evolver
+```
 
 ## License
 
